@@ -1,0 +1,95 @@
+---
+- hosts: all
+  become: true
+  gather_facts: False
+  pre_tasks:
+    - name: Install python for Ansible
+      raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+      register: output
+      changed_when: output.stdout != ""
+
+- hosts: monitoring_servers
+  gather_facts: true
+  become: true
+  roles:
+    - role: mysql
+    - role: apache
+    - role: goozbach.EPEL
+    - role: icinga2-ansible-no-ui
+      icinga2_conf_global: |
+        include "constants.conf"
+        include "zones.conf"
+        include <itl>
+        include <plugins>
+        include "features-enabled/*.conf"
+        include_recursive "conf.d"
+      check_commands:
+        check_nrpe: |
+           "-H", "$address$",
+               "-c", "$remote_nrpe_command$",
+      tags: icinga2-no-ui
+
+    - role: icinga2-ansible-classic-ui
+      icinga2_classic_ui_passwd: 'demo'
+      tags: icinga2-classic-ui
+
+
+- hosts: all
+  gather_facts: true
+
+- hosts: monitoring_servers
+  gather_facts: true
+
+  become: true
+  roles:
+    - role: icinga2-ansible-add-hosts
+      configuration_logic: "object"
+      host_attributes: |
+        check_command = "http"
+        vars.sla = "24x7"
+      host_checks: |
+        object Service "load_average" {
+          check_command = "nrpe"
+          host_name = "{{ hostvars[item]['ansible_fqdn'] }}"
+          vars.nrpe_command = "check_load"
+        }
+        object Service "disk" {
+          host_name = "{{ hostvars[item]['ansible_fqdn'] }}"
+          check_command = "nrpe"
+          vars.nrpe_command = "check_disk"
+        }
+        object Service "logged users" {
+          host_name = "{{ hostvars[item]['ansible_fqdn'] }}"
+          check_command = "nrpe"
+          vars.nrpe_command = "check_users"
+        }
+        object Service "Running procs" {
+          host_name = "{{ hostvars[item]['ansible_fqdn'] }}"
+          check_command = "nrpe"
+          vars.nrpe_command = "check_procs"
+        }
+      tags: add-hosts
+
+- hosts: webservers
+  gather_facts: true
+  become: true
+  roles:
+  - role: apache
+  - role: goozbach.EPEL
+  - role: icinga2-nrpe-agent
+    nrpe_allowed_hosts: ",127.0.0.1"
+    nrpe_configuration: |
+     log_facility=daemon
+     server_port=5666
+     server_address={{ ansible_default_ipv4.address }}
+     dont_blame_nrpe=0
+     debug=0
+     command_timeout=60
+     connection_timeout=150
+    nrpe_check_commands: |
+     command[check_load]={{ nrpe_agent_plugins_x86_64 }}/check_load -w 15,10,8 -c 30,25,15
+     command[check_ssh]={{ nrpe_agent_plugins_x86_64 }}/check_ssh -H {{ ansible_eth0.ipv4.address }} -p {{ ansible_port }}
+     command[check_procs]={{ nrpe_agent_plugins_x86_64 }}/check_procs -w 300 -c 500
+     command[check_disk]={{ nrpe_agent_plugins_x86_64 }}/check_disk -w 15% -c 10% -p / -p /home -p /tmp
+     command[check_users]={{ nrpe_agent_plugins_x86_64 }}/check_users -w 5 -c 8
+    tags: nrpe-agent

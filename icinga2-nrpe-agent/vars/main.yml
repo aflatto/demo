@@ -1,0 +1,3 @@
+---
+# vars file for icinga2-nrpe-agent
+ansible_port: 22
