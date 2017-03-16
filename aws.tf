@@ -1,8 +1,9 @@
 provider "aws" {
   access_key = ""
-  secret_key = "f"
+  secret_key = ""
   region     = ""
 }
+
 
 resource "aws_security_group" "icinga" {
   name        = "Icinga security Group"
@@ -89,4 +90,22 @@ ami           = "ami-d2c924b2"
   tags {
       Name = "node2"
   }
+}
+
+
+
+output "server_ip" {
+    value = "${aws_instance.server.public_ip}"
+}
+
+output "server_internal_ip" {
+    value = "${aws_instance.server.private_ip}"
+}
+
+output "node1_ip" {
+    value = "${aws_instance.node1.public_ip}"
+}
+
+output "node2_ip" {
+    value = "${aws_instance.node2.public_ip}"
 }
