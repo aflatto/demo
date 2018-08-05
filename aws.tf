@@ -1,8 +1,33 @@
+variable "AWS_ACCESS_KEY" {}
+variable "AWS_SECRET_KEY" {}
+variable "AWS_REGIONY" {}
+variable "SSH_KEY_NAME" {}
+variable "SSH_PRIVATE_KEY" {}
+
+
 provider "aws" {
-  access_key = ""
-  secret_key = ""
-  region     = ""
+  region = "${var.AWS_REGION}"
+  access_key = "${var.AWS_ACCESS_KEY}"
+  secret_key = "${var.AWS_SECRET_KEY}"
 }
+
+data "aws_ami" "centos" {
+  most_recent = true
+
+  filter {
+    name = "name"
+    values = [
+      "CENTOS 7 HVM *",
+    ]
+  }
+
+  filter {
+      name   = "architecture"
+      values = ["x86_64"]
+    }
+}
+
+
 
 
 resource "aws_security_group" "icinga" {
@@ -34,14 +59,23 @@ resource "aws_security_group" "icinga" {
   }
 }
 
+resource "null_resource" "inventory" {
+  provisioner "local-exec" {
+       command = "echo [monitoring_servers] > Hosts"
+    }
+}
+
 resource "aws_instance" "server" {
-  ami           = "ami-d2c924b2"
+  ami           = "${data.aws_ami.centos.id}"
   instance_type = "t2.micro"
-  key_name =  ""
+  key_name =  "${var.SSH_KEY_NAME}"
   vpc_security_group_ids = ["${aws_security_group.icinga.id}"]
   tags {
       Name = "icinga-server"
   }
+  provisioner "local-exec" {
+       command = "echo ${aws_instance.server.public_ip} >> Hosts"
+    }
 }
 
 resource "aws_security_group" "nodes" {
@@ -70,42 +104,38 @@ resource "aws_security_group" "nodes" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  provisioner "local-exec" {
+       command = "echo [webservers] >> Hosts"
+    }
+  depends_on = ["aws_instance.server"]
 }
 
 resource "aws_instance" "node1" {
-  ami           = "ami-d2c924b2"
+  ami           = "${data.aws_ami.centos.id}"
   instance_type = "t2.micro"
-  key_name =  ""
+  key_name =  "${var.SSH_KEY_NAME}"
   vpc_security_group_ids = ["${aws_security_group.nodes.id}"]
   tags {
       Name = "node1"
   }
+  provisioner "local-exec" {
+       command = "echo ${aws_instance.node1.public_ip} >>  Hosts"
+    }
 }
 
 resource "aws_instance" "node2" {
-ami           = "ami-d2c924b2"
+ami           = "${data.aws_ami.centos.id}"
   instance_type = "t2.micro"
-  key_name =  ""
+  key_name =  "${var.SSH_KEY_NAME}"
   vpc_security_group_ids = ["${aws_security_group.nodes.id}"]
   tags {
       Name = "node2"
   }
-}
+  provisioner "local-exec" {
+       command = "echo ${aws_instance.node2.public_ip} >>  Hosts"
+    }
 
-
-
-output "server_ip" {
-    value = "${aws_instance.server.public_ip}"
-}
-
-output "server_internal_ip" {
-    value = "${aws_instance.server.private_ip}"
-}
-
-output "node1_ip" {
-    value = "${aws_instance.node1.public_ip}"
-}
-
-output "node2_ip" {
-    value = "${aws_instance.node2.public_ip}"
+  provisioner "local-exec" {
+    command = "ansible-playbook -i Hosts -u centos -b --private-key=${var.SSH_PRIVATE_KEY} site.yml"
+  }
 }
